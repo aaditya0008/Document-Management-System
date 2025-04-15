@@ -127,3 +127,19 @@ DELIMITER ;
 -- Optional cleanup (dev-only)
 -- SET SQL_SAFE_UPDATES = 0;
 -- DELETE FROM otp_verification WHERE id <> 5;
+-- FOLDERS TABLE
+CREATE TABLE IF NOT EXISTS folders (
+    folder_id INT AUTO_INCREMENT PRIMARY KEY,
+    folder_name VARCHAR(255) NOT NULL,
+    created_by INT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- ALTER DOCUMENTS TABLE to link with folders
+ALTER TABLE documents ADD COLUMN folder_id INT;
+
+-- Add foreign key relationship
+ALTER TABLE documents
+ADD CONSTRAINT fk_folder
+FOREIGN KEY (folder_id) REFERENCES folders(folder_id) ON DELETE SET NULL;

@@ -27,28 +27,43 @@ class DocumentMetadata(BaseModel):
             raise ValueError("Permissions must be a list of strings")
         return value
 
-def upload_document(file: UploadFile, title: str, tags: List[str], permissions: List[str], uploaded_by: int, db: Session):
+def upload_document(file: UploadFile, title: str, tags: List[str], permissions: List[str], uploaded_by: int, db: Session, folder_id: Optional[int] = None):
+    # Check if the user exists
     cursor = db.execute(text("SELECT id FROM users WHERE id = :uploaded_by"), {"uploaded_by": uploaded_by})
     user = cursor.fetchone()
     if not user:
-        raise HTTPException(status_code=400, detail="User  does not exist")
+        raise HTTPException(status_code=400, detail="User does not exist")
     
+    # Generate a unique document ID and save the file
     doc_id = str(uuid.uuid4())
     file_path = f"uploads/{doc_id}_{file.filename}"
     os.makedirs("uploads", exist_ok=True)
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
     
+    # Insert the document into the database
     db.execute(
-        text("INSERT INTO documents (document_id, title, file_path, uploaded_by, last_updated) VALUES (:doc_id, :title, :file_path, :uploaded_by, :last_updated)"),
-        {"doc_id": doc_id, "title": title, "file_path": file_path, "uploaded_by": uploaded_by, "last_updated": datetime.now()}
+        text("""
+            INSERT INTO documents (document_id, title, file_path, uploaded_by, last_updated, folder_id)
+            VALUES (:doc_id, :title, :file_path, :uploaded_by, :last_updated, :folder_id)
+        """),
+        {
+            "doc_id": doc_id,
+            "title": title,
+            "file_path": file_path,
+            "uploaded_by": uploaded_by,
+            "last_updated": datetime.now(),
+            "folder_id": folder_id  # Associate the document with the folder if provided
+        }
     )
     
+    # Handle tags
     for tag in tags:
         db.execute(text("INSERT INTO tags (tag_name) VALUES (:tag) ON DUPLICATE KEY UPDATE tag_name=tag_name"), {"tag": tag})
         tag_id = db.execute(text("SELECT tag_id FROM tags WHERE tag_name = :tag"), {"tag": tag}).fetchone()[0]
         db.execute(text("INSERT INTO document_tags (document_id, tag_id) VALUES (:doc_id, :tag_id)"), {"doc_id": doc_id, "tag_id": tag_id})
     
+    # Handle permissions
     for permission in permissions:
         db.execute(text("INSERT INTO permissions (document_id, user_email) VALUES (:doc_id, :user_email)"), {"doc_id": doc_id, "user_email": permission})
     

@@ -7,6 +7,7 @@ from email.mime.multipart import MIMEMultipart
 import jwt
 import smtplib
 from sqlalchemy.orm import Session
+from helpers.database import get_db  # Import get_db from the appropriate module
 from fastapi import HTTPException, Depends, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from helpers.constants import SECRET_KEY, ALGORITHM, SENDER_EMAIL, APP_PASSWORD
@@ -156,11 +157,26 @@ def login_user(db: Session, email: str, password: str):
 
 security = HTTPBearer()
 
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security), db: Session = Depends(get_db)):
     token = credentials.credentials
     try:
+        # Decode the JWT token
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        return payload  # Return the decoded payload (e.g., user info)
+        email = payload.get("sub")  # Extract the email (subject) from the token
+        if not email:
+            raise HTTPException(status_code=401, detail="Invalid token: Email not found")
+
+        # Fetch the user from the database using the email
+        user = db.execute(
+            text("SELECT id, username, email FROM users WHERE email = :email"),
+            {"email": email}
+        ).mappings().fetchone()  # Use .mappings() to return a dictionary-like result
+
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # Return the user details as a dictionary
+        return {"id": user["id"], "username": user["username"], "email": user["email"]}
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token has expired")
     except jwt.InvalidTokenError:

@@ -2,6 +2,7 @@ from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Depends
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import text
 from helpers.database import get_db
 from utility.search import search_documents
 from utility.documents import (
@@ -25,7 +26,7 @@ from utility.transliteration import process_file_input, transliterate_text, clea
 from utility.qna import get_answer, process_file
 from utility.extract_text import process_document_upload
 from utility.extract_images import extract_images_from_pdf
-
+from utility.folders import create_folder, delete_folder, get_all_folders, rename_folder
 app = FastAPI(title="AI Document Processor and Management API")
 
 # Add CORS middleware
@@ -39,10 +40,36 @@ app.add_middleware(
 
 # ✅ Search API
 @app.get("/documents/search")
-def search_endpoint(query: str, db: Session = Depends(get_db), user: dict = Depends(get_current_user)):
+def search_endpoint(
+    query: Optional[str] = None,  # Unified search query
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user)
+):
     try:
-        result = search_documents(query, db)
-        return result
+        if not query:
+            raise HTTPException(status_code=400, detail="Search query cannot be empty.")
+
+        # Query to fetch documents based on tags, title, uploaded_by, or document_id
+        sql_query = """
+        SELECT DISTINCT d.document_id, d.title, u.email AS uploaded_by, f.folder_id, f.folder_name,
+                        GROUP_CONCAT(t.tag_name) AS tags, GROUP_CONCAT(p.user_email) AS permissions
+        FROM documents d
+        LEFT JOIN document_tags dt ON d.document_id = dt.document_id
+        LEFT JOIN tags t ON dt.tag_id = t.tag_id
+        LEFT JOIN permissions p ON d.document_id = p.document_id
+        LEFT JOIN folders f ON d.folder_id = f.folder_id
+        JOIN users u ON d.uploaded_by = u.id
+        WHERE LOWER(d.title) LIKE LOWER(:query)
+           OR LOWER(t.tag_name) LIKE LOWER(:query)
+           OR LOWER(u.email) LIKE LOWER(:query)
+           OR LOWER(d.document_id) LIKE LOWER(:query)
+        GROUP BY d.document_id, d.title, u.email, f.folder_id, f.folder_name
+        """
+
+        # Execute the query
+        documents = db.execute(text(sql_query), {"query": f"%{query}%"}).mappings().all()
+
+        return {"documents": documents} if documents else {"message": "No documents found."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
@@ -54,15 +81,74 @@ def upload_endpoint(
     tags: List[str] = Form(...),
     permissions: List[str] = Form(...),
     uploaded_by: int = Form(...),
+    folder_name: Optional[str] = Form(None),  # Add folder_name as an optional parameter
     db: Session = Depends(get_db),
     user: dict = Depends(get_current_user)
 ):
-    return upload_document(file, title, tags, permissions, uploaded_by, db)
+    # Check if folder_name is provided
+    folder_id = None
+    if folder_name:
+        # Fetch the folder ID based on the folder name
+        folder = db.execute(
+            text("SELECT folder_id FROM folders WHERE folder_name = :folder_name"),
+            {"folder_name": folder_name}
+        ).mappings().fetchone()  # Use .mappings() to return a dictionary-like result
+
+        if not folder:
+            raise HTTPException(status_code=404, detail="Folder not found")
+        folder_id = folder["folder_id"]  # Access folder_id as a dictionary key
+
+    # Pass folder_id to the upload_document function
+    return upload_document(file, title, tags, permissions, uploaded_by, db, folder_id)
 
 # ✅ Get Document Metadata API
 @app.get("/documents/{document_id}")
 def get_metadata_endpoint(document_id: str, db: Session = Depends(get_db), user: dict = Depends(get_current_user)):
-    return get_document_metadata(document_id, db)
+    # Fetch document metadata along with folder name
+    document = db.execute(
+        text("""
+            SELECT d.*, f.folder_name
+            FROM documents d
+            LEFT JOIN folders f ON d.folder_id = f.folder_id
+            WHERE d.document_id = :document_id
+        """),
+        {"document_id": document_id}
+    ).mappings().fetchone()
+
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    # Fetch tags
+    tags = db.execute(
+        text("""
+            SELECT t.tag_name
+            FROM tags t
+            JOIN document_tags dt ON t.tag_id = dt.tag_id
+            WHERE dt.document_id = :document_id
+        """),
+        {"document_id": document_id}
+    ).mappings().fetchall()
+
+    # Fetch permissions
+    permissions = db.execute(
+        text("""
+            SELECT user_email
+            FROM permissions
+            WHERE document_id = :document_id
+        """),
+        {"document_id": document_id}
+    ).mappings().fetchall()
+
+    # Prepare the response
+    return {
+        "document_id": document["document_id"],
+        "title": document["title"],
+        "folder_name": document["folder_name"],  # Include folder name
+        "tags": [tag["tag_name"] for tag in tags],
+        "uploaded_by": document["uploaded_by"],
+        "permissions": [permission["user_email"] for permission in permissions],
+        "last_updated": document["last_updated"]
+    }
 
 # ✅ Download Document API
 @app.get("/documents/download/{document_id}")
@@ -265,7 +351,34 @@ async def change_role_endpoint(
     current_user: dict = Depends(get_current_user)
 ):
     from utility.role_manager import change_user_role
+    user_id = db.execute(
+        text("SELECT id FROM users WHERE email = :email"),
+        {"email": current_user["email"]}
+    ).fetchone()
+    if not user_id:
+        raise HTTPException(status_code=404, detail="User not found")
     return change_user_role(email, new_role, db, current_user)
+
+#folder endpoints
+
+@app.post("/folders/create")
+def create_folder_endpoint(folder_name: str = Form(...), db: Session = Depends(get_db), user: dict = Depends(get_current_user)):
+    print(user)  # Debugging
+    if "id" not in user:
+        raise HTTPException(status_code=400, detail="User ID not found in the request")
+    return create_folder(folder_name, user["id"], db)
+
+@app.delete("/folders/delete/{folder_id}")
+def delete_folder_endpoint(folder_id: int, db: Session = Depends(get_db)):
+    return delete_folder(folder_id, db)  # Ensure the correct order of arguments
+
+@app.put("/folders/rename/{folder_id}")
+def rename_folder_endpoint(folder_id: int, new_name: str = Form(...), db: Session = Depends(get_db)):
+    return rename_folder(folder_id, new_name, db)
+
+@app.get("/folders")
+def get_folders_endpoint(db: Session = Depends(get_db)):
+    return get_all_folders(db)
 
 # ✅ Main entry point (fixed)
 if __name__ == "__main__":
