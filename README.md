@@ -41,9 +41,7 @@ The **Document Management System** is a comprehensive application designed to ha
    uvicorn app_fast_api:app --reload
    ```
 
----
-<<<<<<< HEAD
-=======
+
 
 ## Usage
 
