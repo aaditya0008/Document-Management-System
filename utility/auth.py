@@ -168,7 +168,7 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
 
         # Fetch the user from the database using the email
         user = db.execute(
-            text("SELECT id, username, email FROM users WHERE email = :email"),
+            text("SELECT id, username, email, role FROM users WHERE email = :email"),
             {"email": email}
         ).mappings().fetchone()  # Use .mappings() to return a dictionary-like result
 
@@ -176,7 +176,7 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
             raise HTTPException(status_code=404, detail="User not found")
 
         # Return the user details as a dictionary
-        return {"id": user["id"], "username": user["username"], "email": user["email"]}
+        return {"id": user["id"], "username": user["username"], "email": user["email"], "role": user["role"]}
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token has expired")
     except jwt.InvalidTokenError:
