@@ -380,6 +380,46 @@ def rename_folder_endpoint(folder_id: int, new_name: str = Form(...), db: Sessio
 def get_folders_endpoint(db: Session = Depends(get_db)):
     return get_all_folders(db)
 
+@app.post("/folders/{folder_name}/upload")
+def upload_file_to_folder(
+    folder_name: str,  # Folder name fetched automatically from the URL
+    file: UploadFile = File(...),  # File to upload
+    tags: Optional[List[str]] = Form(None),  # Tags for the document (optional)
+    db: Session = Depends(get_db),  # Database session
+    user: dict = Depends(get_current_user)  # Current user
+):
+    """
+    Upload a file to a specific folder.
+    The folder name is fetched automatically from the URL.
+    """
+    # Extract the original file name
+    original_file_name = file.filename
+
+    # Get the user ID from the current user
+    uploaded_by = user["id"]
+
+    # Fetch the folder ID based on the folder name
+    folder = db.execute(
+        text("SELECT folder_id FROM folders WHERE folder_name = :folder_name"),
+        {"folder_name": folder_name}
+    ).mappings().fetchone()
+
+    if not folder:
+        raise HTTPException(status_code=404, detail=f"Folder '{folder_name}' not found")
+
+    folder_id = folder["folder_id"]  # Access folder_id as a dictionary key
+
+    # Pass the extracted details to the `upload_document` function
+    return upload_document(
+        file=file,
+        title=original_file_name,  # Use the original file name as the title
+        tags=tags or [],  # Handle empty tags by passing an empty list
+        permissions=[],  # No permissions provided in this case
+        uploaded_by=uploaded_by,
+        db=db,
+        folder_id=folder_id
+    )
+
 # ✅ Main entry point (fixed)
 if __name__ == "__main__":
     import uvicorn
