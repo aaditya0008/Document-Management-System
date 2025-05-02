@@ -424,3 +424,12 @@ def upload_file_to_folder(
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+@app.get("/auth/get-role", summary="Get Current User Role")
+def get_user_role_endpoint(
+    current_user: dict = Depends(get_current_user)  # Fetch the current user using the existing function
+):
+    """
+    Endpoint to fetch the role of the currently logged-in user.
+    """
+    return {"role": current_user["role"]}
