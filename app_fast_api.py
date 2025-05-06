@@ -420,6 +420,71 @@ def upload_file_to_folder(
         folder_id=folder_id
     )
 
+@app.get("/folders/{folder_id}/documents", summary="Get Folder Details and Documents")
+def get_folder_documents(
+    folder_id: int,
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user)
+):
+    """
+    Fetch the folder name, folder ID, and all document names inside the folder.
+    """
+    # Fetch folder details
+    folder = db.execute(
+        text("SELECT folder_id, folder_name FROM folders WHERE folder_id = :folder_id"),
+        {"folder_id": folder_id}
+    ).mappings().fetchone()
+
+    if not folder:
+        raise HTTPException(status_code=404, detail="Folder not found")
+
+    # Fetch documents inside the folder
+    documents = db.execute(
+        text("SELECT title FROM documents WHERE folder_id = :folder_id"),
+        {"folder_id": folder_id}
+    ).mappings().fetchall()
+
+    # Prepare the response
+    return {
+        "folder_id": folder["folder_id"],
+        "folder_name": folder["folder_name"],
+        "documents": [doc["title"] for doc in documents]
+    }
+
+@app.get("/folders/all-documents", summary="Get All Folders and Their Documents")
+def get_all_folders_and_documents(
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user)
+):
+    """
+    Fetch all folders with their names, IDs, and the names of all documents inside each folder.
+    """
+    # Fetch all folders
+    folders = db.execute(
+        text("SELECT folder_id, folder_name FROM folders")
+    ).mappings().fetchall()
+
+    if not folders:
+        raise HTTPException(status_code=404, detail="No folders found")
+
+    # Prepare the response
+    response = []
+    for folder in folders:
+        # Fetch documents inside the folder
+        documents = db.execute(
+            text("SELECT title FROM documents WHERE folder_id = :folder_id"),
+            {"folder_id": folder["folder_id"]}
+        ).mappings().fetchall()
+
+        # Append folder details and document names to the response
+        response.append({
+            "folder_name": folder["folder_name"],
+            "folder_id": folder["folder_id"],
+            "files": [doc["title"] for doc in documents]
+        })
+
+    return response
+
 # ✅ Main entry point (fixed)
 if __name__ == "__main__":
     import uvicorn
@@ -433,3 +498,16 @@ def get_user_role_endpoint(
     Endpoint to fetch the role of the currently logged-in user.
     """
     return {"role": current_user["role"]}
+
+@app.get("/auth/get-user-info", summary="Get Current User Info")
+def get_user_info_endpoint(
+    current_user: dict = Depends(get_current_user)  # Fetch the current user using the existing function
+):
+    """
+    Endpoint to fetch the current user's ID, username, and email.
+    """
+    return {
+        "user_id": current_user["id"],
+        "username": current_user["username"],
+        "email": current_user["email"]
+    }
