@@ -137,3 +137,24 @@ def delete_document(document_id: str, db: Session):
     db.commit()
     
     return {"message": "Document deleted successfully"}
+
+def rename_document(document_id: str, current_title: Optional[str], new_title: str, db: Session):
+    # Fetch the document
+    document = db.execute(
+        text("SELECT * FROM documents WHERE document_id = :document_id"),
+        {"document_id": document_id}
+    ).mappings().fetchone()
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    # If current_title is provided, check if it matches
+    if current_title is not None and document["title"] != current_title:
+        raise HTTPException(status_code=400, detail="Current title does not match the document's title")
+
+    # Update the title
+    db.execute(
+        text("UPDATE documents SET title = :new_title WHERE document_id = :document_id"),
+        {"new_title": new_title, "document_id": document_id}
+    )
+    db.commit()
+    return {"message": "Document renamed successfully"}

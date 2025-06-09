@@ -11,7 +11,8 @@ from utility.documents import (
     download_document,
     edit_document_metadata,
     delete_document,
-    DocumentMetadata
+    DocumentMetadata,
+    rename_document
 )
 from utility.auth import register_user, verify_otp, login_user, get_current_user
 from utility.view import fetch_all_documents
@@ -511,3 +512,14 @@ def get_user_info_endpoint(
         "username": current_user["username"],
         "email": current_user["email"]
     }
+
+@app.put("/documents/rename/{document_id}", summary="Rename a document")
+def rename_document_endpoint(
+    document_id: str,
+    current_title: Optional[str] = Form(None),
+    new_title: str = Form(...),
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user)
+):
+    from utility.documents import rename_document
+    return rename_document(document_id, current_title, new_title, db)
